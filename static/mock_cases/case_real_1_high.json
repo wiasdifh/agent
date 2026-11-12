@@ -1,0 +1,28 @@
+{
+  "case_id": "P0001",
+  "lesion": {
+    "size_mm": 82.3,
+    "couinaud_segment": "VIII",
+    "seg_mask_path": "outputs/P0001_lesion.nii.gz"
+  },
+  "features": {
+    "aphe": {
+      "label": "positive",
+      "confidence": 0.95
+    },
+    "washout": {
+      "label": "positive",
+      "confidence": 0.92
+    },
+    "capsule": {
+      "label": "positive",
+      "confidence": 0.88
+    }
+  },
+  "clinical_info": {
+    "afp": "unknown",
+    "cirrhosis": "no"
+  },
+  "phase_features_path": "outputs/P0001_phase_feat.npy",
+  "model_version": "seg-4phase-v1"
+}

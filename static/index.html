@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>肝脏 LI-RADS 智能辅助诊断系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* ================= 全局色彩与排版 ================= */
+        :root { 
+            color-scheme: light; 
+            --navy: #1E3A8A;      /* 高级藏青色 */
+            --bg-gray: #F8FAFC;   /* 极浅冷灰背景 */
+        }
+        body { background-color: var(--bg-gray); color: #334155; font-family: 'Inter', "Microsoft YaHei", sans-serif; overflow-x: hidden; }
+        .card { background-color: #ffffff; border-radius: 12px; border: 1px solid #E2E8F0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02); }
+        
+        /* 滚动条 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+        ::-webkit-scrollbar-track { background: transparent; }
+
+        /* 报告正文模块化卡片 (字体透气感拉满) */
+        .report-module { background-color: #F8FAFC; border-radius: 8px; padding: 24px; margin-bottom: 24px; border: 1px solid #F1F5F9; }
+        .report-content h3 { font-size: 16px; color: var(--navy); font-weight: 700; margin: 0 0 16px 0; padding-bottom: 8px; border-bottom: 1px solid #E2E8F0; }
+        .report-content p { margin-bottom: 16px; line-height: 2.0; font-size: 14px; color: #475569; } /* 行高 2.0，字号 14px */
+        
+        /* 报告头部 */
+        .report-header { text-align: center; border-bottom: 2px solid var(--navy); padding-bottom: 20px; margin-bottom: 24px; }
+        .report-header h2 { font-size: 22px; font-weight: 700; color: var(--navy); margin-bottom: 12px; letter-spacing: 1px; }
+        .report-meta { display: flex; justify-content: space-between; font-size: 13px; color: #64748B; margin-bottom: 8px; }
+        
+        /* 反白核心摘要块 */
+        .report-summary-line { background-color: var(--navy); padding: 16px; border-radius: 8px; font-size: 15px; font-weight: 600; color: #ffffff; margin-bottom: 24px; text-align: center; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.15); }
+        .report-summary-line .highlight { color: #FCD34D; font-size: 18px; font-weight: 800; letter-spacing: 0.5px; }
+
+        /* 影像表格 - 去除竖线与边框，保留浅虚线 */
+        table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+        th { border: none; border-bottom: 1px dashed #CBD5E1; padding: 12px 8px; text-align: left; font-size: 13px; color: #64748B; font-weight: 500; background: transparent; }
+        td { border: none; border-bottom: 1px dashed #E2E8F0; padding: 14px 8px; text-align: left; font-size: 14px; color: #334155; }
+        .mono-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 15px; color: var(--navy); }
+
+        /* 药丸标签 */
+        .pill-positive { background-color: #FEE2E2; color: #991B1B; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; display: inline-block; }
+        .pill-negative { background-color: #DCFCE7; color: #166534; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; display: inline-block; }
+        .pill-uncertain { background-color: #FEF9C3; color: #854D0E; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; display: inline-block; }
+
+        /* 阅片抓取样式 */
+        #modalDragArea { cursor: grab; }
+        #modalDragArea:active { cursor: grabbing; }
+        #modalImage { user-select: none; -webkit-user-drag: none; transition: filter 0.3s ease; }
+        .img-roi-hidden { filter: grayscale(100%) contrast(1.1) brightness(0.9) !important; }
+
+        /* 导出按钮禁用状态 */
+        #btnExportPdf:disabled { opacity: 0.5; cursor: not-allowed; background-color: #E2E8F0; color: #94A3B8; border-color: #E2E8F0; }
+
+        /* Agent 抽屉卡片特效 */
+        .agent-drawer-card { border-top: 3px solid var(--navy); }
+    </style>
+</head>
+<body class="p-4 min-h-screen flex flex-col">
+
+    <!-- 置顶警告条 (轻量级设计) -->
+    <div class="bg-red-50 border border-red-200 text-red-800 px-4 py-2.5 rounded-lg mb-4 text-xs flex items-center gap-2 shrink-0 sticky top-0 z-40 no-print shadow-sm">
+        <i class="fa-solid fa-circle-exclamation text-red-600 text-base"></i>
+        <div class="font-medium"><strong class="text-red-700">原型系统提示：</strong> 本系统仅为技术推演演示，所有输出为推演示例，不构成临床诊断。</div>
+    </div>
+
+    <!-- 顶部操作栏 -->
+    <div class="card p-2 flex items-center gap-3 shrink-0 no-print mb-4 sticky top-14 z-40">
+        <div class="flex flex-1 items-center bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+            <button onclick="prevCase()" class="px-4 py-2 text-gray-400 hover:text-[#1E3A8A] hover:bg-gray-200 transition"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+            <select id="caseSelect" class="flex-1 bg-transparent text-sm px-2 py-2 outline-none border-none text-center text-gray-800 font-medium cursor-pointer">
+                <option value="" disabled selected>加载中...</option>
+            </select>
+            <button onclick="nextCase()" class="px-4 py-2 text-gray-400 hover:text-[#1E3A8A] hover:bg-gray-200 transition"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+        </div>
+
+        <button id="startBtn" onclick="startDiagnose()" class="bg-[#1E3A8A] hover:bg-[#172554] text-white font-medium text-sm rounded-lg px-6 py-2 transition shadow-sm flex items-center gap-2">
+            <i class="fa-solid fa-play text-xs"></i> 运行分析
+        </button>
+        <div id="statusBox" class="text-xs font-bold text-gray-400 w-20 text-center">待运行</div>
+    </div>
+
+    <!-- 主体布局 -->
+    <div class="flex gap-5 flex-1 items-start">
+        
+        <!-- ================= 左侧：正式报告 (60%) ================= -->
+        <div class="w-[60%] flex flex-col gap-4">
+            <div class="card flex flex-col overflow-hidden">
+                <div class="p-3 border-b border-gray-100 bg-white shrink-0 flex justify-between items-center no-print">
+                    <span class="text-sm font-bold text-[#1E3A8A]"><i class="fa-solid fa-file-medical mr-2"></i>诊断报告</span>
+                    <div class="flex items-center gap-3">
+                        <label for="includeImageCheckbox" class="flex items-center gap-1.5 cursor-pointer text-xs text-gray-600 hover:text-[#1E3A8A] transition">
+                            <input type="checkbox" id="includeImageCheckbox" class="accent-[#1E3A8A] w-4 h-4 rounded">
+                            PDF 附带病灶图
+                        </label>
+                        
+                        <div class="flex items-center gap-2 border-l border-gray-200 pl-3 ml-1">
+                            <span class="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-1 rounded border border-amber-200" title="打印面板中可自由选布局，建议关闭页眉页脚">
+                                <i class="fa-solid fa-circle-exclamation mr-1"></i>提示：可自由选布局
+                            </span>
+                            <button id="btnExportPdf" onclick="exportReport()" disabled class="bg-white border border-[#1E3A8A] text-[#1E3A8A] hover:bg-[#F0F4F8] text-xs px-3 py-1.5 rounded-md transition flex items-center gap-1.5 font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"><i class="fa-solid fa-print"></i> 打印/PDF</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white">
+                    <div id="emptyReport" class="flex flex-col items-center justify-center text-gray-400 py-32 no-print">
+                        <i class="fa-regular fa-file-lines text-5xl mb-4 text-gray-300"></i>
+                        <p class="text-sm">等待 Agent 生成诊断报告...</p>
+                    </div>
+                    
+                    <!-- 报告 DOM 区域 -->
+                    <div id="reportBox" class="report-content p-8 hidden">
+                        <div id="reportHtmlContent"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 右侧：影像与 Agent 日志 (40%) ================= -->
+        <div class="w-[40%] flex flex-col gap-4 no-print">
+            
+            <!-- 影像阅片区 (融入纯黑背景) -->
+            <div class="card p-3 flex flex-col">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="text-sm font-bold text-[#1E3A8A]"><i class="fa-solid fa-x-ray mr-2"></i>影像阅片</span>
+                    <div class="flex gap-2">
+                        <button onclick="toggleCompare()" id="compareBtn" class="text-xs bg-gray-50 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-md transition border border-gray-200 font-medium">并排对比</button>
+                        <button onclick="event.stopPropagation(); toggleROI()" class="text-xs bg-gray-50 hover:bg-gray-100 text-gray-600 px-3 py-1.5 rounded-md transition border border-gray-200 font-medium" id="roiToggleBtn">👁 显隐 ROI</button>
+                    </div>
+                </div>
+                
+                <!-- 期相切换：Segmented Control -->
+                <div class="flex bg-gray-100 p-1 rounded-lg mb-3">
+                    <button class="phase-btn flex-1 py-1.5 text-xs font-medium bg-white rounded-md shadow-sm text-[#1E3A8A] transition-all" onclick="switchPhase(this, 'art')">动脉期</button>
+                    <button class="phase-btn flex-1 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-all" onclick="switchPhase(this, 'por')">门脉期</button>
+                    <button class="phase-btn flex-1 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 transition-all" onclick="switchPhase(this, 'del')">延迟期</button>
+                </div>
+
+                <!-- 单图模式：纯黑容器无缝融合 -->
+                <div id="singleImageContainer" class="relative bg-black rounded-lg overflow-hidden flex items-center justify-center cursor-pointer group h-56" onclick="openImageModal('ctImage')">
+                    <img id="ctImage" src="" alt="影像加载中..." class="object-contain w-full h-full opacity-90 transition-all duration-300" onerror="this.style.display='none'; document.getElementById('imgError').style.display='block';">
+                    <div id="imgError" class="text-gray-500 text-xs hidden">暂无切片图像</div>
+                    <div id="roiStatusBadge" class="absolute top-3 right-3 bg-black/60 backdrop-blur-sm text-emerald-400 text-[10px] px-2.5 py-1 rounded-md hidden border border-white/10">ROI已高亮</div>
+                    <div class="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2.5 py-1 rounded-md opacity-0 group-hover:opacity-100 transition border border-white/10">点击放大阅片</div>
+                </div>
+
+                <!-- 并排对比模式 -->
+                <div id="compareImageContainer" class="hidden flex gap-2 h-56 bg-black rounded-lg overflow-hidden p-1">
+                    <div class="w-1/2 relative flex items-center justify-center cursor-pointer group" onclick="openImageModal('compareImgArt')">
+                        <img id="compareImgArt" src="" class="object-contain w-full h-full opacity-90 transition-all duration-300">
+                        <div class="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2 py-1 rounded border border-white/10">动脉期 (APHE)</div>
+                        <div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs">点击放大</div>
+                    </div>
+                    <div class="w-1/2 relative flex items-center justify-center cursor-pointer group" onclick="openImageModal('compareImgDel')">
+                        <img id="compareImgDel" src="" class="object-contain w-full h-full opacity-90 transition-all duration-300">
+                        <div id="compareRightLabel" class="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2 py-1 rounded border border-white/10">延迟期 (Washout)</div>
+                        <div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs">点击放大</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 感知层证据表格 (去竖线版) -->
+            <div class="card p-4">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm font-bold text-[#1E3A8A]"><i class="fa-solid fa-database mr-2"></i>影像特征感知</span>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>核心特征</th>
+                            <th>判读标签</th>
+                            <th class="text-right">置信度</th>
+                        </tr>
+                    </thead>
+                    <tbody id="evidenceTable">
+                        <tr><td colspan="3" class="text-center text-gray-400 py-4">等待 AI 感知影像特征...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Agent推理日志 (抽屉式呼吸感) -->
+            <div id="agentCard" class="card flex flex-col bg-white agent-drawer-card shadow-md">
+                <div class="p-3 border-b border-gray-100 shrink-0 bg-white rounded-t-xl z-10 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition select-none" onclick="toggleAgentLog()">
+                    <span class="text-sm font-bold text-[#1E3A8A]"><i class="fa-solid fa-robot mr-2"></i>Agent 推理链路</span>
+                    <div class="text-xs text-gray-500 font-medium flex items-center gap-1.5">
+                        <span id="toggleText" class="bg-gray-100 px-2 py-1 rounded-md text-gray-600">点击展开</span>
+                        <i id="toggleIcon" class="fa-solid fa-chevron-down transition-transform duration-300 text-gray-400"></i>
+                    </div>
+                </div>
+                
+                <div id="agentContent" class="hidden bg-gray-50/50 rounded-b-xl border-t border-gray-100">
+                    <div id="interactionPanel" class="hidden m-3 mb-0 p-4 bg-amber-50 border border-amber-200 rounded-lg shadow-sm">
+                        <div class="text-xs text-amber-800 font-bold mb-2">⚠️ 需要补充临床信息 (第 <span id="roundCount">1</span>/3 轮)</div>
+                        <div id="questionText" class="text-sm font-medium text-gray-700 mb-3 leading-relaxed"></div>
+                        <div class="flex gap-4 mb-3 text-sm text-gray-700">
+                            <label class="cursor-pointer flex items-center gap-1.5"><input type="radio" name="answer" value="A" class="accent-amber-600 w-4 h-4"> 选项 A</label>
+                            <label class="cursor-pointer flex items-center gap-1.5"><input type="radio" name="answer" value="B" class="accent-amber-600 w-4 h-4"> 选项 B</label>
+                            <label class="cursor-pointer flex items-center gap-1.5"><input type="radio" name="answer" value="C" class="accent-amber-600 w-4 h-4"> 选项 C</label>
+                        </div>
+                        <button onclick="submitAnswer()" class="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold py-2 rounded-md transition shadow-sm">提交回答</button>
+                    </div>
+
+                    <div id="logBox" class="p-4 font-mono text-xs text-gray-500 space-y-2 max-h-64 overflow-y-auto">
+                        <div class="text-center text-gray-400 mt-4">等待运行...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全屏阅片弹窗 -->
+    <div id="imageModal" class="fixed inset-0 z-50 bg-black/95 hidden flex-col no-print backdrop-blur-sm">
+        <div class="flex justify-between items-center p-4 border-b border-white/10 bg-black/50">
+            <div class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                <i class="fa-solid fa-expand text-gray-400"></i> 影像阅片 | <span id="modalRoiStatus" class="text-emerald-400">ROI已高亮</span>
+            </div>
+            <button onclick="closeImageModal()" class="text-gray-400 hover:text-white transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
+        </div>
+        <div class="flex-1 overflow-hidden relative flex items-center justify-center" id="modalDragArea">
+            <img id="modalImage" src="" class="max-w-full max-h-full object-contain" style="transform: scale(1);">
+        </div>
+        <div class="p-4 text-center text-gray-400 text-xs border-t border-white/10 bg-black/50 font-medium">
+            滚轮缩放（以鼠标为中心） | 按住左键拖拽平移
+        </div>
+    </div>
+
+    <script>
+        let currentCaseFile = "";
+        let allCases = [];
+        let currentZoom = 1;
+        let isDragging = false;
+        let startX, startY, translateX = 0, translateY = 0;
+        let currentPhase = 'art';
+        let isCompareMode = false;
+        let latestReportText = "";
+        let currentReportId = ""; 
+        let agentLogExpanded = false; 
+        
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                const res = await fetch('/api/cases');
+                const data = await res.json();
+                allCases = data.cases;
+                const select = document.getElementById('caseSelect');
+                select.innerHTML = '';
+                allCases.forEach(c => {
+                    const opt = document.createElement('option'); opt.value = c; opt.innerText = c; select.appendChild(opt);
+                });
+            } catch (e) {
+                document.getElementById('caseSelect').innerHTML = '<option>后端未连接</option>';
+            }
+            initModalEvents();
+        });
+
+        function toggleAgentLog() {
+            agentLogExpanded = !agentLogExpanded;
+            const content = document.getElementById('agentContent');
+            const icon = document.getElementById('toggleIcon');
+            const text = document.getElementById('toggleText');
+            
+            if (agentLogExpanded) {
+                content.classList.remove('hidden');
+                content.style.display = 'block';
+                icon.style.transform = 'rotate(180deg)';
+                text.innerText = '点击折叠';
+            } else {
+                content.classList.add('hidden');
+                content.style.display = 'none';
+                icon.style.transform = 'rotate(0deg)';
+                text.innerText = '查看 AI 诊断链路';
+            }
+        }
+
+        function prevCase() { const sel = document.getElementById('caseSelect'); if(sel.selectedIndex > 0) { sel.selectedIndex--; startDiagnose(); } }
+        function nextCase() { const sel = document.getElementById('caseSelect'); if(sel.selectedIndex < sel.options.length - 1) { sel.selectedIndex++; startDiagnose(); } }
+        
+        function setStatus(text, colorClass) {
+            const box = document.getElementById('statusBox');
+            box.innerText = text;
+            box.className = `text-xs font-bold w-20 text-center ${colorClass}`;
+        }
+
+        // ================= 导出逻辑 =================
+        function exportReport() {
+            if (!latestReportText) return alert("当前暂无诊断报告，请先运行分析生成报告。");
+            
+            const btn = document.getElementById('btnExportPdf');
+            const originalText = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在生成...';
+            
+            setTimeout(() => {
+                const includeImage = document.getElementById('includeImageCheckbox').checked;
+                const imgSrc = document.getElementById('ctImage').src;
+                const caseId = currentCaseFile.replace('.json', '');
+                const safeTitle = `LI-RADS报告_${caseId}_${currentReportId}`;
+
+                const headerHtml = document.querySelector('#reportHtmlContent .report-header').outerHTML;
+                const bodyHtml = document.querySelector('#reportHtmlContent .report-content-body').outerHTML;
+
+                let printHtml = `
+                    <html>
+                        <head>
+                            <title>${safeTitle}</title>
+                            <style>
+                                @page { margin: 18mm 15mm; }
+                                body { font-family: "SimSun", "FangSong", serif; line-height: 1.6; color: #000; margin: 0; padding: 0; font-size: 15px; background: #fff; }
+                                p, h3, div, img, .report-summary-line, .report-header, #printImageContainer, .disclaimer-print { page-break-inside: avoid !important; break-inside: avoid !important; }
+                                .report-header { text-align: center; border-bottom: 1.5px solid #000; padding-bottom: 12px; margin-bottom: 25px; }
+                                .report-header h2 { font-size: 22px; font-weight: bold; margin: 0 0 15px 0; color: #000; border: none; }
+                                .report-meta { display: flex; justify-content: space-between; font-size: 13px; white-space: nowrap; color: #000; }
+                                .report-meta span { flex: 1; text-align: center; }
+                                .report-meta span:first-child { text-align: left; }
+                                .report-meta span:last-child { text-align: right; }
+                                .report-summary-line { border: 1px solid #000; padding: 12px; font-weight: bold; text-align: center; margin-bottom: 25px; font-size: 15px; background: #fff; color: #000; border-radius: 0; }
+                                .highlight { font-weight: bold; color: #000; text-decoration: underline; }
+                                h3 { border-bottom: 1px solid #000; font-size: 16px; font-weight: bold; padding-bottom: 6px; margin-top: 30px; margin-bottom: 15px; color: #000; }
+                                .report-content-body div { margin-bottom: 12px; line-height: 1.6; }
+                                .printImageContainer { text-align: center; margin: 30px 0; }
+                                .printImageContainer p { font-weight: bold; margin-bottom: 10px; text-align: center; }
+                                .printImageContainer img { border: 1px solid #000; max-height: 300px; display: block; margin: 0 auto; }
+                                .disclaimer-print { margin-top: 50px; padding-top: 15px; border-top: 1px dashed #000; font-size: 12px; color: #333; }
+                                .report-module { background: none !important; border: none !important; padding: 0 !important; margin-bottom: 15px !important; }
+                            </style>
+                        </head>
+                        <body>
+                            ${headerHtml}
+                            ${bodyHtml}
+                `;
+
+                if (includeImage && imgSrc) {
+                    printHtml += `
+                        <div class="printImageContainer">
+                            <p>附：病灶关键切面标注图</p>
+                            <img src="${imgSrc}" alt="病灶附图">
+                        </div>
+                    `;
+                }
+
+                printHtml += `
+                            <div class="disclaimer-print">
+                                <strong>免责声明：</strong>本报告为 AI 辅助推演示例，仅用于科研与技术演示，不构成临床诊断，不可替代执业医师出具正式诊断报告。
+                            </div>
+                        </body>
+                    </html>
+                `;
+
+                const printFrame = document.createElement('iframe');
+                printFrame.style.position = 'absolute';
+                printFrame.style.width = '0';
+                printFrame.style.height = '0';
+                printFrame.style.border = 'none';
+                document.body.appendChild(printFrame);
+
+                const doc = printFrame.contentWindow.document;
+                doc.open();
+                doc.write(printHtml);
+                doc.close();
+
+                setTimeout(() => {
+                    printFrame.contentWindow.focus();
+                    printFrame.contentWindow.print();
+                    
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                        document.body.removeChild(printFrame);
+                    }, 1000);
+                }, 500);
+            }, 300);
+        }
+
+        function toggleCompare() {
+            isCompareMode = !isCompareMode;
+            const single = document.getElementById('singleImageContainer');
+            const compare = document.getElementById('compareImageContainer');
+            const btn = document.getElementById('compareBtn');
+            
+            if(isCompareMode) {
+                single.classList.add('hidden');
+                compare.classList.remove('hidden');
+                btn.classList.add('bg-gray-200', 'text-gray-900');
+                updateCompareImages(currentPhase);
+            } else {
+                single.classList.remove('hidden');
+                compare.classList.add('hidden');
+                btn.classList.remove('bg-gray-200', 'text-gray-900');
+                document.getElementById('ctImage').src = `mock_cases/${currentCaseFile.replace('.json', '')}_${currentPhase}.png?v=${Date.now()}`;
+            }
+        }
+
+        function updateCompareImages(phase) {
+            if(!currentCaseFile) return;
+            const baseName = currentCaseFile.replace('.json', '');
+            document.getElementById('compareImgArt').src = `mock_cases/${baseName}_art.png?v=${Date.now()}`;
+            
+            let suffix = "_del";
+            let phaseName = "延迟期";
+            if(phase === 'por') { suffix = "_por"; phaseName = "门脉期"; }
+            if(phase === 'del') { suffix = "_del"; phaseName = "延迟期"; }
+            
+            document.getElementById('compareImgDel').src = `mock_cases/${baseName}${suffix}.png?v=${Date.now()}`;
+            document.getElementById('compareRightLabel').innerText = `${phaseName} ${suffix === '_del' ? '(Washout)' : ''}`;
+        }
+
+        function switchPhase(btn, phase) {
+            currentPhase = phase;
+            document.querySelectorAll('.phase-btn').forEach(b => {
+                b.classList.remove('bg-white', 'shadow-sm', 'text-[#1E3A8A]');
+                b.classList.add('text-gray-500');
+            });
+            btn.classList.remove('text-gray-500');
+            btn.classList.add('bg-white', 'shadow-sm', 'text-[#1E3A8A]');
+
+            if(!currentCaseFile) return;
+
+            let phaseName = "动脉期";
+            if(phase === 'por') phaseName = "门脉期";
+            if(phase === 'del') phaseName = "延迟期";
+            
+            const roiBadge = document.getElementById('roiStatusBadge');
+            if(!roiBadge.classList.contains('hidden')) roiBadge.innerText = roiVisible ? `ROI已高亮` : `ROI已隐藏`;
+            document.getElementById('modalRoiStatus').innerText = roiVisible ? `ROI已高亮 · ${phaseName}` : `ROI已隐藏 · ${phaseName}`;
+
+            if (isCompareMode) {
+                updateCompareImages(phase);
+            } else {
+                const baseName = currentCaseFile.replace('.json', '');
+                let suffix = "_art";
+                if(phase === 'por') suffix = "_por";
+                if(phase === 'del') suffix = "_del";
+                const newSrc = `mock_cases/${baseName}${suffix}.png?v=${Date.now()}`;
+                document.getElementById('ctImage').src = newSrc;
+                document.getElementById('modalImage').src = newSrc;
+            }
+        }
+
+        let roiVisible = true;
+        function toggleROI() {
+            roiVisible = !roiVisible;
+            const statusBadge = document.getElementById('roiStatusBadge');
+            const modalStatus = document.getElementById('modalRoiStatus');
+            
+            const singleImg = document.getElementById('ctImage');
+            const modalImg = document.getElementById('modalImage');
+            const compareArt = document.getElementById('compareImgArt');
+            const compareDel = document.getElementById('compareImgDel');
+
+            let phaseName = currentPhase === 'art' ? "动脉期" : (currentPhase === 'por' ? "门脉期" : "延迟期");
+
+            if(roiVisible) {
+                singleImg.classList.remove('img-roi-hidden');
+                modalImg.classList.remove('img-roi-hidden');
+                compareArt.classList.remove('img-roi-hidden');
+                compareDel.classList.remove('img-roi-hidden');
+                
+                statusBadge.innerText = `ROI已高亮`;
+                modalStatus.innerText = `ROI已高亮 · ${phaseName}`;
+            } else {
+                singleImg.classList.add('img-roi-hidden');
+                modalImg.classList.add('img-roi-hidden');
+                compareArt.classList.add('img-roi-hidden');
+                compareDel.classList.add('img-roi-hidden');
+                
+                statusBadge.innerText = `ROI已隐藏`;
+                modalStatus.innerText = `ROI已隐藏 · ${phaseName}`;
+            }
+        }
+
+        // ================= 核心修复：模糊匹配与强确定性过滤 =================
+        function buildClinicalReport(rawText, lr, conf, evidenceStr, caseFile) {
+            latestReportText = rawText; 
+            
+            let cleanText = rawText.replace(/#+\s*/g, '').replace(/\*\*/g, '');
+            
+            // 强确定性词汇过滤
+            cleanText = cleanText.replace(/即影像学确诊肝细胞癌/g, '影像上高度提示肝细胞癌');
+            cleanText = cleanText.replace(/影像学确诊/g, '影像上高度提示');
+            cleanText = cleanText.replace(/确诊/g, '高度提示');
+            cleanText = cleanText.replace(/明确诊断/g, '高度提示');
+
+            if (cleanText.includes('对于合并慢性肝')) {
+                 cleanText = cleanText.replace(/对于合并慢性肝[^\n]*/g, '4. 对于合并慢性肝病的患者，需要持续监测基础肝病情况，规范开展保肝、抗病毒等对应治疗。');
+            } else if (cleanText.includes('如出现腹痛加重、黄疸、发热、消瘦等新发症状')) {
+                 cleanText = cleanText.replace(/如出现腹痛加重、黄疸、发热、消瘦等新发症状(?!，)/g, '如出现腹痛加重、黄疸、发热、消瘦等新发症状，请及时就诊复查评估。');
+            }
+            
+            cleanText = cleanText.replace(/[\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\uFE00-\uFE0F]/g, ''); 
+            cleanText = cleanText.replace(/\t/g, ' ').replace(/  +/g, ' ');
+            
+            cleanText = cleanText.replace(/0\.(\d+)/g, (match) => {
+                let val = parseFloat(match);
+                if(val <= 1.0) return Math.round(val * 100) + '%';
+                return match;
+            });
+            
+            let summaryHtml = '';
+            if (lr === 'uncertain' || lr === 'Uncertain') {
+                summaryHtml = `分级：<span class="highlight">Uncertain</span> ｜ 判读提示：关键信息不足，无法完成 LI-RADS 风险分层 ｜ 置信度：<span class="highlight">${(conf * 100).toFixed(0)}%</span>`;
+            } else {
+                summaryHtml = `分级：<span class="highlight">${lr}</span> ｜ 判读提示：影像上高度提示肝细胞癌（HCC） ｜ 置信度：<span class="highlight">${(conf * 100).toFixed(0)}%</span>`;
+            }
+            
+            let lines = cleanText.split('\n');
+            let contentHtml = '';
+            let currentModule = '';
+
+            lines.forEach(line => {
+                line = line.trim();
+                if(!line) return;
+                
+                // ✅ 模糊拦截：去掉所有空格、符号后，只要这行包含“肝脏影像学”且包含“报告”，就直接丢弃
+                const cleanLine = line.replace(/\s/g, '').replace(/#/g, '').replace(/[*_\-、\.]/g, '');
+                if (cleanLine.includes('肝脏影像学') && cleanLine.includes('报告')) {
+                    return; 
+                }
+                
+                if(/^[一二三四五六七八九十]、/.test(line) || line.includes('诊断结论') || line.includes('随访与诊疗建议') || line.includes('影像所见')) {
+                    if(currentModule) contentHtml += `</div>`;
+                    contentHtml += `<div class="report-module"><h3>${line}</h3>`;
+                    currentModule = 'open';
+                } else {
+                    if (!currentModule) { contentHtml += `<div class="report-module">`; currentModule = 'open'; }
+                    
+                    if (/^\d+[\.、]/.test(line)) {
+                        contentHtml += `<div style="margin-bottom:16px; line-height:2.0; font-size:14px;"><span style="font-weight:bold; color:#1E3A8A; margin-right:8px;">${line.substring(0, 2)}</span>${line.substring(2)}</div>`;
+                    } else {
+                        contentHtml += `<p>${line}</p>`;
+                    }
+                }
+            });
+            if(currentModule) contentHtml += `</div>`;
+
+            let now = new Date();
+            let timeStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            currentReportId = `RPT-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-001`;
+
+            let finalHtml = `
+                <div class="report-header">
+                    <h2>肝脏 LI-RADS 智能辅助诊断报告</h2>
+                    <div class="report-meta">
+                        <span>报告编号：${currentReportId}</span>
+                        <span>生成时间：${timeStr}</span>
+                        <span>病例编号：${caseFile.replace('.json','')}</span>
+                        <span>检查项目：上腹部多期增强 CT</span>
+                    </div>
+                    <div class="report-summary-line mt-6">
+                        ${summaryHtml}
+                    </div>
+                </div>
+                
+                <div class="report-content-body">
+                    ${contentHtml}
+                </div>
+            `;
+            
+            return finalHtml;
+        }
+
+        function renderEvidence(evidenceStr) {
+            try {
+                const data = JSON.parse(evidenceStr);
+                const tbody = document.getElementById('evidenceTable');
+                
+                let html = '';
+                if(data.lesion) {
+                    html += `<tr><td colspan="3" class="text-gray-400 text-xs pb-2 border-none">病灶大小：${data.lesion.size_mm}mm ｜ 肝段：${data.lesion.couinaud_segment}</td></tr>`;
+                }
+
+                const addRow = (name, tip, feat) => {
+                    if(!feat) return;
+                    let pillClass = "";
+                    let labelText = "";
+                    if (feat.label === 'positive') { pillClass = "pill-positive"; labelText = "阳性"; }
+                    else if (feat.label === 'negative') { pillClass = "pill-negative"; labelText = "阴性"; }
+                    else { pillClass = "pill-uncertain"; labelText = "不确定"; }
+
+                    html += `<tr>
+                        <td class="text-gray-600 font-medium" data-tooltip="${tip}">${name}</td>
+                        <td><span class="${pillClass}">${labelText}</span></td>
+                        <td class="text-right"><span class="mono-num">${feat.confidence.toFixed(2)}</span></td>
+                    </tr>`;
+                };
+                
+                if(data.features) {
+                    addRow("APHE（动脉期高强化）", "动脉期异常明显增强", data.features.aphe);
+                    addRow("Washout（廓清）", "门脉/延迟期强化减低", data.features.washout);
+                    addRow("Capsule（假包膜）", "病灶边缘强化假包膜", data.features.capsule);
+                }
+                
+                tbody.innerHTML = html;
+            } catch(e) {}
+        }
+
+        function renderLogs(logs) {
+            const box = document.getElementById('logBox');
+            box.innerHTML = '';
+            if(logs.length === 0) {
+                box.innerHTML = `<div class="text-center text-gray-400 mt-4">无推理日志</div>`;
+                return;
+            }
+            
+            let html = ``;
+            logs.forEach(l => {
+                let prefix = l.role === 'system' ? '系统' : (l.role === 'user' ? '医生' : '推理');
+                let color = l.role === 'system' ? 'text-blue-600' : (l.role === 'user' ? 'text-amber-600' : 'text-emerald-600');
+                html += `<div class="bg-white border border-gray-100 p-3 rounded-lg shadow-sm mb-2">
+                            <span class="${color} font-bold text-[10px] uppercase tracking-wider block mb-1">[${prefix}]</span> 
+                            <span class="text-gray-700 font-sans text-sm">${l.text}</span>
+                         </div>`;
+            });
+            box.innerHTML = html;
+        }
+
+        async function startDiagnose() {
+            currentCaseFile = document.getElementById('caseSelect').value;
+            if(!currentCaseFile) return alert("请选择病例");
+
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 分析中';
+            document.getElementById('interactionPanel').classList.add('hidden');
+            
+            const exportBtn = document.getElementById('btnExportPdf');
+            exportBtn.disabled = true;
+            latestReportText = "";
+            
+            if(!agentLogExpanded) toggleAgentLog();
+            
+            const imgEl = document.getElementById('ctImage');
+            const imgError = document.getElementById('imgError');
+            const roiBadge = document.getElementById('roiStatusBadge');
+            
+            imgEl.style.display = 'none'; 
+            imgError.style.display = 'none';
+            roiBadge.classList.add('hidden');
+            document.getElementById('compareImageContainer').classList.add('hidden');
+            document.getElementById('singleImageContainer').classList.remove('hidden');
+            isCompareMode = false;
+            document.getElementById('compareBtn').classList.remove('bg-gray-200', 'text-gray-900');
+            
+            document.getElementById('emptyReport').style.display = 'none';
+            const reportBox = document.getElementById('reportBox');
+            reportBox.classList.remove('hidden');
+            document.getElementById('reportHtmlContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 text-[#1E3A8A]"><i class="fa-solid fa-circle-notch fa-spin text-3xl mb-4"></i><p class="text-sm font-medium">Agent 正在生成诊断报告...</p></div>`;
+            
+            setStatus("分析中", "text-amber-600");
+            document.getElementById('logBox').innerHTML = `<div class="text-center text-gray-500 mt-4"><i class="fa-solid fa-spinner fa-spin mr-2"></i>正在连接感知层模型...</div>`;
+
+            try {
+                const res = await fetch('/api/analyze_step1', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ case_file: currentCaseFile })
+                });
+                const data = await res.json();
+                
+                renderLogs(data.logs);
+                renderEvidence(data.evidence);
+                
+                const baseName = currentCaseFile.replace('.json', '');
+                imgEl.style.display = 'block'; 
+                imgEl.src = `mock_cases/${baseName}_art.png?v=${Date.now()}`; 
+                roiBadge.classList.remove('hidden');
+                document.getElementById('modalImage').src = imgEl.src;
+
+                if (data.status === "done") {
+                    const finalHtml = buildClinicalReport(data.report, data.result_data.lr, data.result_data.conf, data.evidence, currentCaseFile);
+                    document.getElementById('reportHtmlContent').innerHTML = finalHtml;
+                    setStatus("✅ 完成", "text-emerald-600");
+                    exportBtn.disabled = false;
+                    resetBtn();
+                } else if (data.status === "need_more_info") {
+                    // ✅ 修改提示词
+                    document.getElementById('reportHtmlContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 text-amber-600"><i class="fa-solid fa-triangle-exclamation text-4xl mb-4"></i><p class="text-sm font-medium">发现证据冲突，请下滑右侧补充</p></div>`;
+                    showInteractionPanel(data);
+                    setStatus("等待补充", "text-amber-600");
+                    resetBtn();
+                } else {
+                    setStatus("❌ 错误", "text-red-600");
+                    document.getElementById('reportHtmlContent').innerText = "推理异常，请重新运行病例。";
+                    resetBtn();
+                }
+            } catch(e) {
+                setStatus("❌ 系统错误", "text-red-600");
+                document.getElementById('reportHtmlContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 text-red-600"><p>推理异常，请检查后端服务。</p></div>`;
+                resetBtn();
+            }
+        }
+
+        function showInteractionPanel(data) {
+            const panel = document.getElementById('interactionPanel');
+            panel.classList.remove('hidden');
+            document.getElementById('roundCount').innerText = data.round;
+            
+            let cleanQuestion = data.question.replace(/\*\*/g, '');
+            cleanQuestion = cleanQuestion.replace(/\n/g, '<br>');
+            document.getElementById('questionText').innerHTML = cleanQuestion;
+            
+            document.querySelectorAll('input[name="answer"]').forEach(el => el.checked = false);
+            panel.dataset.targetField = data.target_field;
+            panel.dataset.round = data.round;
+            
+            if(!agentLogExpanded) toggleAgentLog();
+        }
+
+        async function submitAnswer() {
+            const selected = document.querySelector('input[name="answer"]:checked');
+            if(!selected) return alert("请选择一个选项");
+            
+            const panel = document.getElementById('interactionPanel');
+            const targetField = panel.dataset.targetField;
+            const round = parseInt(panel.dataset.round);
+            
+            panel.classList.add('hidden');
+            document.getElementById('reportHtmlContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 text-[#1E3A8A]"><i class="fa-solid fa-circle-notch fa-spin text-3xl mb-4"></i><p class="text-sm font-medium">已接收信息，重新推理中...</p></div>`;
+            setStatus("重新推理", "text-amber-600");
+
+            try {
+                const res = await fetch('/api/analyze_step2', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        case_file: currentCaseFile, target_field: targetField, 
+                        answer: selected.value, round_num: round
+                    })
+                });
+                const data = await res.json();
+                
+                renderLogs(data.logs);
+                renderEvidence(data.evidence);
+                
+                if (data.status === "done") {
+                    const finalHtml = buildClinicalReport(data.report, data.result_data.lr, data.result_data.conf, data.evidence, currentCaseFile);
+                    document.getElementById('reportHtmlContent').innerHTML = finalHtml;
+                    setStatus("✅ 完成", "text-emerald-600");
+                    document.getElementById('btnExportPdf').disabled = false;
+                } else if (data.status === "need_more_info") {
+                    // ✅ 修改提示词
+                    document.getElementById('reportHtmlContent').innerHTML = `<div class="flex flex-col items-center justify-center py-20 text-amber-600"><i class="fa-solid fa-triangle-exclamation text-4xl mb-4"></i><p class="text-sm font-medium">发现证据冲突，请下滑右侧补充</p></div>`;
+                    showInteractionPanel(data);
+                    setStatus("等待补充", "text-amber-600");
+                }
+            } catch(e) {
+                setStatus("❌ 提交失败", "text-red-600");
+            }
+        }
+
+        function resetBtn() {
+            const btn = document.getElementById('startBtn');
+            btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-play text-xs"></i> 运行分析';
+        }
+
+        function openImageModal(sourceId = 'ctImage') {
+            const imgElement = document.getElementById(sourceId);
+            if(!imgElement || !imgElement.src) return;
+            
+            document.getElementById('modalImage').src = imgElement.src;
+            
+            let statusText = document.getElementById('modalRoiStatus');
+            let phaseName = "";
+            if (sourceId === 'ctImage') {
+                phaseName = currentPhase === 'art' ? "动脉期" : (currentPhase === 'por' ? "门脉期" : "延迟期");
+            } else if (sourceId === 'compareImgArt') {
+                phaseName = "动脉期";
+            } else if (sourceId === 'compareImgDel') {
+                let label = document.getElementById('compareRightLabel').innerText;
+                phaseName = label.split(' ')[0];
+            }
+            
+            let isRoiVisible = !imgElement.classList.contains('img-roi-hidden');
+            statusText.innerText = `${isRoiVisible ? 'ROI已高亮' : 'ROI已隐藏'} · ${phaseName}`;
+
+            document.getElementById('imageModal').classList.remove('hidden');
+            document.getElementById('imageModal').classList.add('flex');
+            resetModalTransform();
+        }
+
+        function closeImageModal() {
+            document.getElementById('imageModal').classList.add('hidden');
+            document.getElementById('imageModal').classList.remove('flex');
+            resetModalTransform();
+        }
+
+        function resetModalTransform() {
+            currentZoom = 1; translateX = 0; translateY = 0; updateModalTransform();
+        }
+
+        function updateModalTransform() {
+            const img = document.getElementById('modalImage');
+            img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${currentZoom})`;
+        }
+
+        function initModalEvents() {
+            const dragArea = document.getElementById('modalDragArea');
+            const modalImg = document.getElementById('modalImage');
+
+            dragArea.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                
+                const rect = dragArea.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left - rect.width / 2;
+                const mouseY = e.clientY - rect.top - rect.height / 2;
+                
+                const zoomSpeed = 0.15;
+                let newZoom = currentZoom;
+                if (e.deltaY < 0) newZoom += zoomSpeed; 
+                else newZoom -= zoomSpeed; 
+                
+                if(newZoom < 0.5) newZoom = 0.5;
+                if(newZoom > 8) newZoom = 8;
+                
+                const ratio = newZoom / currentZoom;
+                translateX = mouseX - (mouseX - translateX) * ratio;
+                translateY = mouseY - (mouseY - translateY) * ratio;
+                
+                currentZoom = newZoom;
+                updateModalTransform();
+            }, { passive: false });
+
+            dragArea.addEventListener('mousedown', (e) => {
+                if(e.button !== 0) return; 
+                
+                isDragging = true; 
+                startX = e.clientX - translateX; 
+                startY = e.clientY - translateY;
+                
+                modalImg.style.transition = 'none';
+                dragArea.style.cursor = 'grabbing';
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if(!isDragging) return;
+                translateX = e.clientX - startX; 
+                translateY = e.clientY - startY;
+                updateModalTransform();
+            });
+
+            window.addEventListener('mouseup', () => {
+                if(!isDragging) return;
+                isDragging = false;
+                modalImg.style.transition = 'transform 0.1s ease-out';
+                dragArea.style.cursor = 'grab';
+            });
+        }
+    </script>
+</body>
+</html>
