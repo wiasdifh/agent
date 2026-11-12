@@ -127,3 +127,7 @@ def analyze_step2(req: AnswerRequest):
 # 注意：这行代码必须放在所有 API 路由定义的最下方！
 # directory="." 表示当前目录（即 D:\agent），html=True 允许直接访问目录时默认返回 index.html
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+if __name__ == "__main__":
+    import uvicorn
+    # CloudBase HTTP 云函数强制要求监听 9000 端口
+    uvicorn.run(app, host="0.0.0.0", port=9000)
